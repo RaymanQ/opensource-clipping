@@ -36,42 +36,110 @@ const StudioAPI = (() => {
     return !!getBackendUrl();
   }
 
-  /** Generic fetch wrapper with error handling */
-  async function request(path, options = {}) {
+  function resolveUrl(path) {
+    if (!path) return '';
+    if (/^https?:\/\//i.test(path)) return path;
+    const base = getBackendUrl();
+    return base ? new URL(path, `${base}/`).toString() : path;
+  }
+
+  function requestHeaders(headers = {}, body = null, includeAuth = true) {
+    const result = new Headers(headers);
+    if (!result.has('ngrok-skip-browser-warning')) {
+      result.set('ngrok-skip-browser-warning', 'true');
+    }
+    const token = getAccessToken();
+    if (includeAuth && token && !result.has('Authorization')) {
+      result.set('Authorization', `Bearer ${token}`);
+    }
+    if (body && !(body instanceof FormData) && !result.has('Content-Type')) {
+      result.set('Content-Type', 'application/json');
+    }
+    return result;
+  }
+
+  async function fetchFromBackend(path, options = {}) {
     const base = getBackendUrl();
     if (!base) throw new Error('Backend URL not configured. Please connect first.');
 
-    const url = `${base}${path}`;
-    const { timeout = 30000, ...fetchOptions } = options;
-    const headers = {
-      'ngrok-skip-browser-warning': 'true',
-      ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
-      ...(options.headers || {}),
-    };
-    if (fetchOptions.body && !(fetchOptions.body instanceof FormData)) {
-      headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-    }
+    const url = resolveUrl(path);
+    const { timeout = 30000, headers: optionHeaders, signal: externalSignal, ...fetchOptions } = options;
+    const isBackendOrigin = new URL(url).origin === new URL(base).origin;
+    const headers = requestHeaders(optionHeaders, fetchOptions.body, isBackendOrigin);
     const controller = new AbortController();
-    const timer = timeout ? setTimeout(() => controller.abort(), timeout) : null;
+    let timedOut = false;
+    const abortFromCaller = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener('abort', abortFromCaller, { once: true });
+    }
+    const timer = timeout ? setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeout) : null;
     let res;
     try {
       res = await fetch(url, { ...fetchOptions, headers, signal: controller.signal });
     } catch (error) {
-      if (error.name === 'AbortError') throw new Error('Backend request timed out.');
+      if (error.name === 'AbortError' && timedOut) throw new Error('Backend request timed out.');
+      if (error.name === 'AbortError') throw error;
       throw new Error('Backend is offline or unreachable.');
     } finally {
       if (timer) clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener('abort', abortFromCaller);
     }
+    return res;
+  }
 
+  async function ensureResponseOk(res) {
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
+      const responseText = await res.text().catch(() => '');
+      let body = {};
+      try { body = responseText ? JSON.parse(responseText) : {}; }
+      catch { body = {}; }
       const detail = Array.isArray(body.detail)
         ? body.detail.map(item => item.msg || JSON.stringify(item)).join('; ')
-        : (typeof body.detail === 'object' ? JSON.stringify(body.detail) : body.detail);
-      throw new Error(detail || `Request failed: ${res.status}`);
+        : (body.detail && typeof body.detail === 'object' ? JSON.stringify(body.detail) : body.detail);
+      const shortText = responseText && responseText.length <= 300 ? responseText : '';
+      throw new Error(detail || shortText || `Request failed: ${res.status}`);
     }
+    return res;
+  }
 
+  /** Generic JSON fetch wrapper with error handling. */
+  async function request(path, options = {}) {
+    const res = await ensureResponseOk(await fetchFromBackend(path, options));
     return res.json();
+  }
+
+  /** Fetch a protected backend resource without attempting JSON decoding. */
+  async function fetchBlob(path, options = {}) {
+    const res = await ensureResponseOk(await fetchFromBackend(path, options));
+    return res.blob();
+  }
+
+  async function createAuthenticatedObjectUrl(path, options = {}) {
+    const blob = await fetchBlob(path, { timeout: 0, ...options });
+    return URL.createObjectURL(blob);
+  }
+
+  async function downloadFile(path, filename, options = {}) {
+    const objectUrl = await createAuthenticatedObjectUrl(path, options);
+    const safeFilename = String(filename || 'download')
+      .split(/[\\/]/).pop()
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim() || 'download';
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = safeFilename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    try {
+      anchor.click();
+    } finally {
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    }
   }
 
   // ---- Health ----
@@ -128,11 +196,6 @@ const StudioAPI = (() => {
     return request('/api/upload/asset', { method: 'POST', body, timeout: 0 });
   }
 
-  function resolveUrl(path) {
-    if (!path) return '';
-    return /^https?:\/\//i.test(path) ? path : `${getBackendUrl()}${path}`;
-  }
-
   // ---- SSE for real-time job status ----
   function createSSE(jobId, onMessage) {
     const base = getBackendUrl();
@@ -145,11 +208,7 @@ const StudioAPI = (() => {
         controller = new AbortController();
         try {
           const res = await fetch(`${base}/api/jobs/${encodeURIComponent(jobId)}/status`, {
-            headers: {
-              Accept: 'text/event-stream',
-              'ngrok-skip-browser-warning': 'true',
-              ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
-            },
+            headers: requestHeaders({ Accept: 'text/event-stream' }),
             signal: controller.signal,
           });
           if (!res.ok || !res.body) throw new Error(`Stream failed: ${res.status}`);
@@ -202,6 +261,9 @@ const StudioAPI = (() => {
     uploadVideo,
     uploadAsset,
     resolveUrl,
+    fetchBlob,
+    createAuthenticatedObjectUrl,
+    downloadFile,
     createSSE,
     shutdownServer,
   };

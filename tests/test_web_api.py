@@ -2,9 +2,11 @@ import os
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from web.api.app import app, _parse_allowed_origins
+from web.api.routes import files
 from web.api.routes.files import UPLOAD_DIR
 
 
@@ -70,3 +72,35 @@ def test_optional_bearer_auth(monkeypatch):
             headers={"Authorization": "Bearer unit-token"},
         )
         assert response.status_code == 200
+
+
+def test_output_file_requires_valid_bearer_token(monkeypatch, tmp_path):
+    monkeypatch.setenv("OSC_API_TOKEN", "unit-token")
+    monkeypatch.setattr(files, "OUTPUTS_DIR", str(tmp_path))
+    job_dir = tmp_path / "job-123"
+    job_dir.mkdir()
+    payload = b"fake-mp4-payload"
+    (job_dir / "highlight.mp4").write_bytes(payload)
+
+    with TestClient(app) as secured:
+        output_url = "/api/outputs/job-123/highlight.mp4"
+        assert secured.get(output_url).status_code == 401
+        assert secured.get(
+            output_url,
+            headers={"Authorization": "Bearer wrong-token"},
+        ).status_code == 401
+
+        response = secured.get(
+            output_url,
+            headers={"Authorization": "Bearer unit-token"},
+        )
+        assert response.status_code == 200
+        assert response.content == payload
+        assert response.headers["content-type"] == "video/mp4"
+
+
+def test_output_path_traversal_is_rejected(monkeypatch, tmp_path):
+    monkeypatch.setattr(files, "OUTPUTS_DIR", str(tmp_path))
+    with pytest.raises(HTTPException) as exc_info:
+        files._safe_output_path("job-123", "../outside.mp4")
+    assert exc_info.value.status_code == 400
