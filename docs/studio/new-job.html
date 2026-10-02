@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Job — OSC Studio</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config={darkMode:'class',theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],display:['Outfit','sans-serif']},colors:{brand:{50:'#f5f3ff',400:'#a78bfa',500:'#6366f1',600:'#4f46e5',700:'#4338ca'}}}}}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script><link rel="stylesheet" href="studio.css">
+  <script>if(localStorage.getItem('theme')==='dark')document.documentElement.classList.add('dark')</script>
+</head>
+<body class="simple-mode bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 font-sans">
+<div id="mobile-overlay" class="mobile-overlay hidden" onclick="closeSidebar()"></div>
+<div class="studio-layout">
+  <aside id="sidebar" class="studio-sidebar">
+    <div class="sidebar-brand"><a href="../index.html" class="flex items-center gap-2 mb-2"><span class="p-1.5 rounded-lg bg-brand-600 text-white">✂</span><span class="font-display font-bold text-sm text-brand-600 dark:text-brand-400">Opensource Clipping</span></a><h2 class="font-display font-bold text-lg">🎬 Studio</h2><p class="text-xs text-slate-400">AI Auto-Clipper · Remote GPU</p></div>
+    <nav class="sidebar-nav"><a href="index.html" class="sidebar-link"><i data-lucide="layout-dashboard" class="nav-icon"></i>Dashboard</a><a href="new-job.html" class="sidebar-link active"><i data-lucide="plus-circle" class="nav-icon"></i>New Job</a><a href="settings.html" class="sidebar-link"><i data-lucide="settings" class="nav-icon"></i>Settings</a></nav>
+    <div class="connect-panel"><div class="flex items-center gap-2 mb-2"><span id="connect-dot" class="connect-dot offline"></span><span id="connect-label" class="text-xs text-slate-500 truncate flex-1">Not connected</span></div><div class="flex gap-2"><button id="connect-btn" onclick="showConnectModal()" class="studio-button secondary flex-1">Connect</button><button id="sidebar-stop-btn" onclick="stopBackendServer()" class="hidden studio-button danger">Stop</button></div><button onclick="toggleTheme()" class="studio-button secondary w-full mt-2">Toggle theme</button></div>
+  </aside>
+  <main class="studio-main">
+    <div class="md:hidden sticky top-0 z-30 flex items-center gap-3 px-4 h-14 bg-white/90 dark:bg-slate-950/90 border-b dark:border-slate-800"><button onclick="toggleSidebar()" class="mobile-toggle">☰</button><b>🎬 New Job</b></div>
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 py-8 fade-in">
+      <div class="flex flex-wrap justify-between gap-4 mb-7"><div><h1 class="font-display font-bold text-3xl">New Clipping Job</h1><p class="text-sm text-slate-500 mt-1">Simple by default, complete when you need it.</p></div><div class="mode-switch"><button type="button" data-ui-mode="simple" class="active">Simple</button><button type="button" data-ui-mode="advanced">Advanced</button></div></div>
+      <form id="new-job-form">
+        <section id="source-card" class="glass-card setting-group mb-5">
+          <h2 class="section-title"><i data-lucide="video" class="w-5 h-5 text-brand-500"></i>Source</h2>
+          <div class="source-tabs">
+            <button type="button" data-source-mode="url" class="active">From URL</button><button type="button" data-source-mode="upload">Upload Video</button><button type="button" data-source-mode="batch">Batch URLs</button><button type="button" data-source-mode="reuse">Reuse Job</button>
+          </div>
+          <div data-source-panel="url" class="source-panel"><label>Video URL<input id="source-url" type="url" placeholder="https://www.youtube.com/watch?v=..."></label><label>Platform<select id="source-platform"><option value="youtube">YouTube</option><option value="tiktok">TikTok</option><option value="instagram">Instagram</option><option value="gdrive">Google Drive</option></select></label></div>
+          <div data-source-panel="upload" class="source-panel hidden"><label class="upload-dropzone">Source video<input id="source-upload" type="file" accept="video/*"></label></div>
+          <div data-source-panel="batch" class="source-panel hidden"><label>One URL per line<textarea id="batch-urls" rows="6" placeholder="https://..."></textarea></label><p class="help">Duplicates and blank lines are removed. Maximum 20 jobs per batch.</p></div>
+          <div data-source-panel="reuse" class="source-panel hidden"><label>Existing job<select id="reuse-job"><option value="">Loading jobs…</option></select></label></div>
+          <label class="advanced-only mt-3">yt-dlp cookies browser or server filename<input name="yt_cookies" placeholder="youtube_cookies.txt"></label>
+        </section>
+
+        <section class="glass-card setting-group mb-5">
+          <div class="grid md:grid-cols-[1fr_2fr] gap-4 items-end"><label>Preset<select id="preset-select"></select></label><div><p id="preset-description" class="help mb-2"></p><button type="button" id="reset-defaults" class="studio-button secondary">Reset to Defaults</button></div></div>
+        </section>
+
+        <div id="sections"></div>
+        <div id="form-error" class="hidden error-panel mb-4"></div>
+        <div id="batch-progress" class="hidden glass-card setting-group mb-4"></div>
+        <button id="submit-btn" class="studio-button primary text-sm px-6 py-3" type="submit"><i data-lucide="rocket" class="w-4 h-4"></i>Start Clipping</button>
+      </form>
+    </div>
+  </main>
+</div>
+<script src="api.js"></script>
+<script>
+const F=(name,label,type='text',def='',extra={})=>({name,label,type,default:def,...extra});
+const SECTIONS=[
+ {title:'Basic',icon:'sliders-horizontal',open:true,fields:[
+  F('clips','Number of clips','number',7,{min:1,max:30}),F('ratio','Aspect ratio','select','9:16',{options:['9:16','16:9','1:1','3:4','4:5'],cap:'aspect_ratios'}),F('source_height','Source height','text','max',{help:'max or a positive height'}),F('render_height','Render height','text','1080',{help:'source or a positive height'}),F('cleanup_source','Delete downloaded source after render','checkbox',false,{advanced:true})]},
+ {title:'AI & Analysis',icon:'brain',fields:[F('ai_provider','AI provider','select','gemini',{options:['gemini','nvidia'],cap:'ai_providers'}),F('gemini_model','Gemini model','text','gemini-3-flash-preview',{advanced:true}),F('gemini_fallback_model','Gemini fallback model','text','gemini-2.5-flash',{advanced:true}),F('nvidia_model','NVIDIA model','text','deepseek-ai/deepseek-v4-pro',{advanced:true}),F('load_gemini_json','Reuse saved AI JSON','checkbox',false,{advanced:true})]},
+ {title:'Whisper / Transcription',icon:'captions',fields:[F('whisper_model','Whisper model','text','large-v3'),F('whisper_device','Device','select','cuda',{options:['cuda','cpu','auto'],cap:'whisper_devices'}),F('whisper_compute_type','Compute type','text','float16',{advanced:true}),F('use_dlp_subs','Prefer platform subtitles','checkbox',false)]},
+ {title:'B-Roll',icon:'film',fields:[F('use_broll','Enable B-roll','checkbox',true),F('broll_provider','Provider','select','auto',{options:['auto','pixabay','pexels'],cap:'broll_providers',condition:'use_broll'})]},
+ {title:'Hook',icon:'zap',fields:[F('use_hook_glitch','Enable Hook V1','checkbox',true),F('hook_duration','Hook duration','number',3,{min:1,max:30}),F('hook_source','Custom hook URL','url','',{advanced:true}),F('hook_source_start','Custom hook start','number',0,{min:0,step:.1,advanced:true}),F('hook_asset','Custom hook video','file','',{accept:'video/*',advanced:true}),F('hook_v2','Enable Hook V2','checkbox',false),F('hook_v2_items','Hook V2 items','number',3,{min:2,max:6,condition:'hook_v2',advanced:true}),F('hook_v2_style','Hook V2 style','text','controversial_fast_glitch',{condition:'hook_v2',advanced:true}),F('white_flash_duration','White flash duration','number',.12,{min:.01,max:2,step:.01,condition:'hook_v2',advanced:true}),F('no_segment_trim','Disable segment trimming','checkbox',false,{advanced:true}),F('silence_trim','Aggressive silence trim','checkbox',false)]},
+ {title:'Subtitle & Typography',icon:'type',fields:[F('no_subs','Disable subtitles','checkbox',false),F('words_per_sub','Words per subtitle','number',5,{min:1,max:15}),F('font_style','Font style','select','HORMOZI',{options:['DEFAULT','STORYTELLER','HORMOZI','CINEMATIC'],cap:'font_styles'}),F('use_karaoke_effect','Karaoke effect','checkbox',true),F('advanced_text','Advanced kinetic text','checkbox',false,{advanced:true}),F('advanced_text_hook','Advanced hook text','checkbox',false,{advanced:true})]},
+ {title:'Audio / Background Music',icon:'music',fields:[F('use_auto_bgm','Enable BGM','checkbox',true),F('bgm_mode','BGM mode','select','ducking',{options:['ducking','background'],cap:'bgm_modes'}),F('bgm_base_volume','Base volume','number',.25,{min:0,max:2,step:.05,advanced:true})]},
+ {title:'Podcast / Split Screen',icon:'panel-top',fields:[F('use_split_screen','Split screen','checkbox',false),F('use_camera_switch','Camera switch','checkbox',false),F('use_dynamic_split','Dynamic split','checkbox',false,{condition:'use_split_screen'}),F('split_trigger','Split trigger','select','diarization',{options:['diarization','face'],condition:'use_split_screen'}),F('diarization_speakers','Speakers','text','auto',{help:'auto or positive integer'}),F('switch_hold_duration','Switch hold seconds','number',2,{min:0,step:.1,advanced:true}),F('switch_blend_duration','Switch blend seconds','number',0,{min:0,max:5,step:.1,advanced:true}),F('split_zoom','Panel zoom','number',1,{min:1,max:5,step:.1,advanced:true}),F('split_v_align','Vertical alignment','number',.5,{min:0,max:1,step:.05,advanced:true}),F('split_auto_zoom','Auto zoom','checkbox',false,{advanced:true}),F('split_max_zoom','Maximum auto zoom','number',2.5,{min:1,max:6,step:.1,advanced:true})]},
+ {title:'Face Detection & Auto Framing',icon:'scan-face',advanced:true,fields:[F('face_detector','Face detector','select','mediapipe',{options:['mediapipe','yolo'],cap:'face_detectors'}),F('yolo_size','YOLO size','select','8m',{options:['8n','8s','8m','8n_v2','9c'],cap:'yolo_sizes',condition:'face_detector=yolo'}),F('static_crop','Static crop for square ratios','checkbox',false)]},
+ {title:'Tracking',icon:'crosshair',advanced:true,fields:[F('track_step','Detection interval','number','',{min:.01,max:10,step:.01,optional:true}),F('track_deadzone','Deadzone','number','',{min:0,max:1,step:.01,optional:true}),F('track_smooth','Smoothing','number','',{min:.01,max:1,step:.01,optional:true}),F('track_jitter','Jitter pixels','number','',{min:0,max:500,optional:true}),F('track_snap','Snap threshold','number','',{min:0,max:2,step:.01,optional:true}),F('track_conf','Detection confidence','number',.55,{min:0,max:1,step:.01}),F('track_smooth_window','Smooth window','number',12,{min:1,max:300}),F('scene_cut_threshold','Scene cut threshold','number',18,{min:0,max:255}),F('track_iou_threshold','IOU threshold','number',.2,{min:0,max:1,step:.01})]},
+ {title:'Video Quality',icon:'badge-hd',advanced:true,fields:[F('video_bitrate','Bitrate','text','auto',{help:'auto, 8M, 1200k'}),F('video_sharpen','Sharpen','checkbox',false),F('video_cq','NVENC CQ','number',23,{min:0,max:51}),F('video_crf','x264 CRF','number',20,{min:0,max:51}),F('video_preset','Encoder preset','select','auto',{options:['auto','p1','p4','p7','veryfast','fast','medium','slow'],cap:'video_presets'}),F('video_scale_algo','Scale algorithm','select','lanczos',{options:['lanczos','bicubic','bilinear','area'],cap:'video_scale_algorithms'})]},
+ {title:'Watermark',icon:'stamp',fields:[F('watermark','Enable watermark','checkbox',false),F('watermark_text','Text','text','',{condition:'watermark'}),F('watermark_asset','Image','file','',{accept:'image/*',condition:'watermark'}),F('watermark_opacity','Opacity %','number',70,{min:1,max:100,condition:'watermark'}),F('watermark_position','Position','select','center-right',{options:['top-left','top-center','top-right','center-left','center','center-right','bottom-left','bottom-center','bottom-right'],cap:'watermark_positions',condition:'watermark'}),F('watermark_padding','Padding','number',0,{min:0,condition:'watermark',advanced:true}),F('watermark_font_size','Font size (0 auto)','number',0,{min:0,condition:'watermark',advanced:true}),F('watermark_scale','Image scale %','number',15,{min:1,max:100,condition:'watermark',advanced:true})]},
+ {title:'Voice Over',icon:'mic-2',fields:[F('voiceover','Enable voiceover','checkbox',false),F('voiceover_voice','Edge TTS voice','text','en-GB-MaisieNeural',{condition:'voiceover'}),F('voiceover_lang','Language','select','en',{options:['en','id'],condition:'voiceover'}),F('voiceover_style','Style','select','analysis',{options:['analysis','reaction','lesson','summary'],cap:'voiceover_styles',condition:'voiceover'}),F('voiceover_length','Length','select','short',{options:['short','normal','long'],condition:'voiceover'}),F('voiceover_volume','Voice volume','number',1,{min:0,max:3,step:.05,condition:'voiceover',advanced:true}),F('original_volume','Original audio volume','number',.15,{min:0,max:3,step:.05,condition:'voiceover',advanced:true})]},
+ {title:'Edge Glow',icon:'sparkles',advanced:true,fields:[F('edge_glow','Apply glow to full clip','checkbox',false),F('edge_glow_mode','Glow mode','select','smooth',{options:['default','smooth','full'],cap:'edge_glow_modes',condition:'edge_glow'})]},
+ {title:'Story Mode',icon:'book-open',fields:[F('story_mode','Enable Story Mode','checkbox',false),F('story_recipe_asset','Story recipe JSON','file','',{accept:'.json',condition:'story_mode'}),F('sources_json_asset','Sources JSON','file','',{accept:'.json',condition:'story_mode'}),F('story_source_assets','Local source videos','file','',{accept:'video/*',multiple:true,condition:'story_mode',help:'Optional. sources.json local_path may use the original filename.'}),F('story_output_dir','Output folder name','text','story_clips',{condition:'story_mode',advanced:true}),F('skip_download','Use cached Story downloads','checkbox',false,{condition:'story_mode'})]},
+ {title:'Advanced / Developer',icon:'wrench',advanced:true,fields:[F('box_face_detection','Draw face boxes','checkbox',false),F('dev_mode','Developer visualization','checkbox',false),F('dev_mode_with_output','Also render standard output','checkbox',false),F('dev_mode_with_output_merge','Merged dev/standard output','checkbox',false),F('track_lines','Tracking crosshairs','checkbox',false)]}
+];
+let sourceMode='url', capabilities={}, initialDefaults={};
+const sections=document.getElementById('sections');
+function renderField(field){
+ const attrs=['name="'+field.name+'"',field.min!==undefined?'min="'+field.min+'"':'',field.max!==undefined?'max="'+field.max+'"':'',field.step!==undefined?'step="'+field.step+'"':'',field.accept?'accept="'+field.accept+'"':'',field.multiple?'multiple':''].join(' ');
+ let control;
+ if(field.type==='checkbox') control='<label class="toggle-switch"><input type="checkbox" '+attrs+(field.default?' checked':'')+'><span class="toggle-slider"></span></label>';
+ else if(field.type==='select') control='<select '+attrs+' data-cap="'+(field.cap||'')+'">'+field.options.map(v=>'<option value="'+v+'"'+(String(v)===String(field.default)?' selected':'')+'>'+v+'</option>').join('')+'</select>';
+ else control='<input type="'+field.type+'" '+attrs+' value="'+(field.type==='file'?'':field.default)+'">';
+ return '<div class="setting-row '+(field.advanced?'advanced-only ':'')+'" data-condition="'+(field.condition||'')+'"><div><label>'+field.label+'</label>'+(field.help?'<p class="help">'+field.help+'</p>':'')+'</div>'+control+'</div>';
+}
+const STORY_SAFE=new Set(['Basic','Whisper / Transcription','Video Quality','Story Mode']);
+sections.innerHTML=SECTIONS.map(s=>'<details class="accordion '+(s.advanced?'advanced-only ':'')+(STORY_SAFE.has(s.title)?'':'story-incompatible ')+'" '+(s.open?'open':'')+'><summary><span><i data-lucide="'+s.icon+'" class="w-4 h-4"></i>'+s.title+'</span><i data-lucide="chevron-down" class="w-4 h-4 chevron"></i></summary><div class="accordion-body">'+s.fields.map(renderField).join('')+'</div></details>').join('');
+function allFields(){return SECTIONS.flatMap(s=>s.fields)}
+function setSourceMode(mode){sourceMode=mode;document.querySelectorAll('[data-source-mode]').forEach(b=>b.classList.toggle('active',b.dataset.sourceMode===mode));document.querySelectorAll('[data-source-panel]').forEach(p=>p.classList.toggle('hidden',p.dataset.sourcePanel!==mode))}
+document.querySelectorAll('[data-source-mode]').forEach(b=>b.onclick=()=>setSourceMode(b.dataset.sourceMode));
+document.querySelectorAll('[data-ui-mode]').forEach(b=>b.onclick=()=>{document.body.classList.toggle('simple-mode',b.dataset.uiMode==='simple');document.querySelectorAll('[data-ui-mode]').forEach(x=>x.classList.toggle('active',x===b))});
+function fieldValue(field){
+ const el=document.querySelector('[name="'+field.name+'"]'); if(!el||field.type==='file')return undefined;
+ if(field.type==='checkbox')return el.checked;
+ if(field.optional&&el.value==='')return undefined;
+ if(field.type==='number')return Number(el.value);
+ return el.value;
+}
+function setField(name,value){const el=document.querySelector('[name="'+name+'"]');if(!el)return;if(el.type==='checkbox')el.checked=!!value;else el.value=value;updateConditions()}
+function updateConditions(){
+ document.querySelectorAll('[data-condition]').forEach(row=>{const c=row.dataset.condition;if(!c)return;const parts=c.split('=');const el=document.querySelector('[name="'+parts[0]+'"]');const visible=parts.length===2?el&&String(el.value)===parts[1]:el&&el.checked;row.classList.toggle('hidden',!visible)});
+ document.body.classList.toggle('story-mode',!!document.querySelector('[name="story_mode"]').checked);
+}
+document.getElementById('sections').addEventListener('change',updateConditions);
+const preset=document.getElementById('preset-select');
+preset.innerHTML=Object.entries(JOB_PRESETS).map(([key,p])=>'<option value="'+key+'">'+p.label+'</option>').join('');
+function applyDefaults(values={}){allFields().forEach(f=>setField(f.name,values[f.name]!==undefined?values[f.name]:f.default))}
+preset.onchange=()=>{const p=JOB_PRESETS[preset.value];applyDefaults({...initialDefaults,...p.values});document.getElementById('preset-description').textContent=p.description};
+document.getElementById('reset-defaults').onclick=()=>{preset.value='recommended';applyDefaults(initialDefaults);preset.onchange()};
+async function loadBackendData(){
+ try{
+  const [caps,settings,jobs]=await Promise.all([StudioAPI.fetchCapabilities(),StudioAPI.fetchSettings(),StudioAPI.fetchJobs()]);
+  capabilities=caps;
+  document.querySelectorAll('select[data-cap]').forEach(select=>{const values=caps[select.dataset.cap];if(values){const current=select.value;select.innerHTML=values.map(v=>'<option value="'+v+'">'+v+'</option>').join('');if(values.includes(current))select.value=current}});
+  initialDefaults={clips:settings.default_clips,ratio:settings.default_ratio,font_style:settings.default_font_style,whisper_model:settings.default_whisper_model,whisper_device:settings.default_whisper_device,whisper_compute_type:settings.default_whisper_compute_type,ai_provider:settings.default_ai_provider,gemini_model:settings.default_gemini_model,gemini_fallback_model:settings.default_gemini_fallback_model,nvidia_model:settings.default_nvidia_model,source_height:settings.default_source_height,render_height:settings.default_render_height,video_preset:settings.default_video_preset,video_scale_algo:settings.default_video_scale_algo,bgm_mode:settings.default_bgm_mode,broll_provider:settings.default_broll_provider};
+  applyDefaults(initialDefaults);
+  const reuse=document.getElementById('reuse-job');const reusable=jobs.jobs.filter(j=>j.status==='completed');reuse.innerHTML='<option value="">Select a job</option>'+reusable.map(j=>'<option value="'+j.id+'">'+formatDate(j.created_at)+' · '+(j.url||j.upload_filename||j.id)+' · '+j.id+'</option>').join('');
+  reuse.onchange=()=>{const selected=reusable.find(j=>j.id===reuse.value);if(selected)applyDefaults({...initialDefaults,...selected.config})};
+  const requestedReuse=new URLSearchParams(location.search).get('reuse');if(requestedReuse){setSourceMode('reuse');reuse.value=requestedReuse}
+ }catch(e){console.warn(e)}
+}
+async function uploadNamed(field,assetType,payload,key){
+ const input=document.querySelector('[name="'+field+'"]');if(!input||!input.files.length)return;
+ const result=assetType==='video'?await StudioAPI.uploadVideo(input.files[0]):await StudioAPI.uploadAsset(input.files[0],assetType);payload[key]=result.filename;
+}
+async function prepareStorySources(payload){
+ const sourcesInput=document.querySelector('[name="sources_json_asset"]'), videos=document.querySelector('[name="story_source_assets"]');
+ if(!sourcesInput.files.length)return;
+ const map={};
+ for(const file of videos.files){const uploaded=await StudioAPI.uploadVideo(file);map[file.name]=uploaded.filename}
+ let doc=JSON.parse(await sourcesInput.files[0].text());
+ (doc.sources||[]).forEach(src=>{if(src.platform==='local'&&map[src.local_path])src.local_path=map[src.local_path]});
+ const resolved=new File([JSON.stringify(doc,null,2)],'sources.json',{type:'application/json'});
+ payload.sources_json_filename=(await StudioAPI.uploadAsset(resolved,'sources_json')).filename;
+}
+async function buildPayload(){
+ const payload={};allFields().forEach(f=>{const v=fieldValue(f);if(v!==undefined)payload[f.name]=v});
+ ['hook_asset','watermark_asset','story_recipe_asset','sources_json_asset','story_source_assets'].forEach(k=>delete payload[k]);
+ if(!payload.story_mode){
+  if(sourceMode==='url'){payload.url=document.getElementById('source-url').value.trim();payload.source=document.getElementById('source-platform').value}
+  if(sourceMode==='reuse')payload.reuse_job_id=document.getElementById('reuse-job').value;
+ }
+ if(sourceMode==='upload'){const file=document.getElementById('source-upload').files[0];if(file)payload.upload_filename=(await StudioAPI.uploadVideo(file)).filename}
+ await uploadNamed('hook_asset','hook',payload,'hook_source_filename');
+ await uploadNamed('watermark_asset','watermark',payload,'watermark_image_filename');
+ if(payload.story_mode){
+  await uploadNamed('story_recipe_asset','story_recipe',payload,'story_recipe_filename');
+  await prepareStorySources(payload);
+ }
+ return payload;
+}
+document.getElementById('new-job-form').onsubmit=async e=>{
+ e.preventDefault();const error=document.getElementById('form-error'),btn=document.getElementById('submit-btn');error.classList.add('hidden');
+ if(!StudioAPI.isConfigured()){showConnectModal();return}
+ btn.disabled=true;btn.textContent='Submitting…';
+ try{
+  if(sourceMode==='batch'&&!document.querySelector('[name="story_mode"]').checked){
+   const urls=[...new Set(document.getElementById('batch-urls').value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean))];
+   if(!urls.length||urls.length>20)throw new Error('Batch requires 1–20 unique URLs.');
+   const panel=document.getElementById('batch-progress');panel.classList.remove('hidden');panel.innerHTML='<h3 class="section-title">Batch progress</h3>';
+   const base=await buildPayload();
+   for(let i=0;i<urls.length;i++){const job=await StudioAPI.createJob({...base,url:urls[i],source:document.getElementById('source-platform').value});panel.innerHTML+='<p><a class="text-brand-600" href="job.html?id='+job.id+'">Job '+(i+1)+' · '+job.id+'</a> — queued</p>'}
+   return;
+  }
+  const payload=await buildPayload();const job=await StudioAPI.createJob(payload);location.href='job.html?id='+encodeURIComponent(job.id);
+ }catch(err){error.textContent=err.message;error.classList.remove('hidden')}finally{btn.disabled=false;btn.innerHTML='Start Clipping'}
+};
+applyDefaults();preset.onchange();updateConditions();loadBackendData();lucide.createIcons();
+</script>
+</body></html>
